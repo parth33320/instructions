@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+easyocr
+fuzzywuzzy
+python-multipart
+python-Levenshtein
+opencv-python-headless
+Pillow
+requests
