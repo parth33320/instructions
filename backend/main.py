@@ -135,7 +135,7 @@ async def analyze_label(
     # Perform OCR
     # pytesseract.image_to_string returns a string
     start_ocr = time.time()
-    full_text = pytesseract.image_to_string(image, config='--psm 6')
+    full_text = pytesseract.image_to_string(image)
     ocr_time = time.time() - start_ocr
     print(f"OCR processing time: {ocr_time:.4f} seconds")
 
