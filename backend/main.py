@@ -9,7 +9,7 @@ from PIL import Image
 import io
 import re
 import math
-from fuzzywuzzy import fuzz, process
+from rapidfuzz import fuzz, process
 
 app = FastAPI(title="TTB Label Verification API")
 
@@ -119,7 +119,8 @@ async def analyze_label(
     government_warning: str = Form(...)
 ):
     contents = await file.read()
-    image = Image.open(io.BytesIO(contents)).convert('RGB')
+    image = Image.open(io.BytesIO(contents)).convert('L')
+    image.thumbnail((1500, 1500))
 
     # Perform OCR
     # pytesseract.image_to_string returns a string
@@ -162,14 +163,6 @@ async def analyze_label(
     # 2. ABV/Proof Verification (Regex)
     # Use robust parser for alcohol content
     abv_matches_info = parse_alcohol_content(full_text)
-
-    # Also search in individual lines for better precision
-    for line in extracted_text_list:
-        line_matches = parse_alcohol_content(line)
-        existing_phrases = [m["phrase"] for m in abv_matches_info]
-        for lm in line_matches:
-            if lm["phrase"] not in existing_phrases:
-                abv_matches_info.append(lm)
 
     # Normalize expected ABV to just numbers for comparison
     expected_abv_nums = re.findall(r'(\d+(?:\.\d+)?)', abv)
