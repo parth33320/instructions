@@ -1,9 +1,7 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pytesseract
-fuzzywuzzy
+rapidfuzz
 python-multipart
-python-Levenshtein
-opencv-python-headless
 Pillow
 requests
