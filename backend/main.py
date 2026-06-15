@@ -5,7 +5,6 @@ from typing import List, Optional
 import uvicorn
 import pytesseract
 import numpy as np
-import time
 from PIL import Image
 import io
 import re
@@ -119,25 +118,12 @@ async def analyze_label(
     abv: str = Form(...),
     government_warning: str = Form(...)
 ):
-    start_load = time.time()
     contents = await file.read()
     image = Image.open(io.BytesIO(contents)).convert('RGB')
 
-    # Resize image if width > 800
-    if image.width > 800:
-        aspect_ratio = image.height / image.width
-        new_height = int(800 * aspect_ratio)
-        image = image.resize((800, new_height), Image.Resampling.LANCZOS)
-
-    load_time = time.time() - start_load
-    print(f"Image loading time: {load_time:.4f} seconds")
-
     # Perform OCR
     # pytesseract.image_to_string returns a string
-    start_ocr = time.time()
     full_text = pytesseract.image_to_string(image)
-    ocr_time = time.time() - start_ocr
-    print(f"OCR processing time: {ocr_time:.4f} seconds")
 
     # Split into lines for the brand name check logic that follows
     extracted_text_list = [line.strip() for line in full_text.split('\n') if line.strip()]
