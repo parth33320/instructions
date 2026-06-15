@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface VerificationResult {
   field: string;
@@ -18,6 +18,8 @@ interface AnalysisResponse {
   extracted_text: string;
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [brandName, setBrandName] = useState("OLD TOM DISTILLERY");
@@ -29,6 +31,17 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [batchFiles, setBatchFiles] = useState<FileList | null>(null);
   const [batchResults, setBatchResults] = useState<AnalysisResponse[]>([]);
+
+  // --- PERF FIX #5: Frontend warmup ping ---
+  // Render free tier hibernates after 15 min of inactivity. Sending a lightweight
+  // GET / request the moment the page loads gives the container ~5-10 seconds to
+  // wake up before the user ever clicks "Analyze". This hides the cold-start
+  // latency entirely for typical page-load → read → upload workflows.
+  useEffect(() => {
+    fetch(`${API_URL}/`).catch(() => {
+      // Silence errors — this is a best-effort warmup, not a health gate.
+    });
+  }, []);
 
   const handleSingleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,10 +56,8 @@ export default function Home() {
     formData.append("abv", abv);
     formData.append("government_warning", warning);
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
     try {
-      const response = await fetch(`${apiUrl}/analyze`, {
+      const response = await fetch(`${API_URL}/analyze`, {
         method: "POST",
         body: formData,
       });
@@ -67,17 +78,15 @@ export default function Home() {
     setLoading(true);
     const results: AnalysisResponse[] = [];
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
     for (let i = 0; i < batchFiles.length; i++) {
       const formData = new FormData();
       formData.append("file", batchFiles[i]);
-      formData.append("brand_name", brandName); // For prototype, same data
+      formData.append("brand_name", brandName);
       formData.append("abv", abv);
       formData.append("government_warning", warning);
 
       try {
-        const response = await fetch(`${apiUrl}/analyze`, {
+        const response = await fetch(`${API_URL}/analyze`, {
           method: "POST",
           body: formData,
         });
@@ -202,7 +211,7 @@ export default function Home() {
 
         {/* Results Section */}
         {result && (
-          <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-blue-600 mb-8 animation-fade-in">
+          <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-blue-600 mb-8">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold">Verification Results</h2>
               <span
@@ -230,7 +239,10 @@ export default function Home() {
                       Expected: <span className="text-gray-900">{res.expected}</span>
                     </p>
                     <p className="text-sm text-gray-500">
-                      Actual: <span className="text-gray-900 italic">"{res.actual}"</span>
+                      Actual:{" "}
+                      <span className="text-gray-900 italic">
+                        &ldquo;{res.actual}&rdquo;
+                      </span>
                     </p>
                   </div>
                   <div className="mt-2 md:mt-0 flex items-center gap-4">
@@ -265,30 +277,48 @@ export default function Home() {
         {/* Batch Results Table */}
         {batchResults.length > 0 && (
           <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-purple-600 mb-8">
-            <h2 className="text-2xl font-bold mb-6">Batch Results ({batchResults.length} files)</h2>
+            <h2 className="text-2xl font-bold mb-6">
+              Batch Results ({batchResults.length} files)
+            </h2>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead>
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Discrepancies</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Filename
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Discrepancies
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {batchResults.map((br, i) => (
                     <tr key={i}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{br.filename}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {br.filename}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                          br.overall_status === 'PASS' ? 'bg-green-100 text-green-800' :
-                          br.overall_status === 'WARNING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
-                        }`}>
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs font-bold ${
+                            br.overall_status === "PASS"
+                              ? "bg-green-100 text-green-800"
+                              : br.overall_status === "WARNING"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-red-100 text-red-800"
+                          }`}
+                        >
                           {br.overall_status}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-500">
-                        {br.results.filter(r => r.status !== 'PASS').map(r => r.field).join(', ') || 'None'}
+                        {br.results
+                          .filter((r) => r.status !== "PASS")
+                          .map((r) => r.field)
+                          .join(", ") || "None"}
                       </td>
                     </tr>
                   ))}
