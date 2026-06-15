@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 import io
 import re
+import math
 from fuzzywuzzy import fuzz, process
 
 app = FastAPI(title="TTB Label Verification API")
@@ -37,6 +38,32 @@ class AnalysisResponse(BaseModel):
 @app.get("/")
 async def root():
     return {"message": "TTB Label Verification API is running"}
+
+def parse_alcohol_content(text: str):
+    """
+    Robustly extract alcohol content values and their surrounding phrases.
+    Keywords: alc, alc., alcohol, vol, vol., volume, alc/vol, alc./vol., %, proof
+    """
+    # Suffixes: Ordered from longest to shortest to ensure the most descriptive match is captured.
+    suffix = r'(?:\s*(?:ALC\.?\/VOL\.?\.?|%\s*ALC\.?\/VOL\.?\.?|%\s*BY\s*VOLUME|%\s*BY\s*VOL\.?|%\s*VOLUME|%\s*VOL\.?|BY\s*VOLUME|BY\s*VOL\.?|VOLUME|VOL\.?|PROOF|%))'
+    # Prefixes: ALC, ALCOHOL, etc.
+    prefix = r'(?:(?:ALCOHOL|ALC\.?)\s*)'
+
+    # Pattern: (Prefix Number Suffix?) OR (Number Suffix)
+    # Using re.IGNORECASE for keyword matching
+    pattern = r'(?:' + prefix + r'(\d+(?:\.\d+)?)(?:' + suffix + r')?)|(?:(\d+(?:\.\d+)?)' + suffix + r')'
+
+    matches = []
+    for match in re.finditer(pattern, text, re.IGNORECASE):
+        full_phrase = match.group(0).strip()
+        # The numeric value could be in group 1 or group 2
+        value = match.group(1) if match.group(1) else match.group(2)
+        if value:
+            matches.append({
+                "value": value,
+                "phrase": full_phrase
+            })
+    return matches
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_label(
@@ -87,17 +114,16 @@ async def analyze_label(
     ))
 
     # 2. ABV/Proof Verification (Regex)
-    # Common formats: "45% ALC/VOL", "90 PROOF", "45% ALC. BY VOL."
-    # Extract numbers associated with % or PROOF
-    abv_pattern = r'(\d+(?:\.\d+)?)\s*(?:%|ALC|PROOF)'
-    abv_matches = re.findall(abv_pattern, full_text, re.IGNORECASE)
+    # Use robust parser for alcohol content
+    abv_matches_info = parse_alcohol_content(full_text)
 
     # Also search in individual lines for better precision
     for line in extracted_text_list:
-        line_matches = re.findall(abv_pattern, line, re.IGNORECASE)
-        abv_matches.extend(line_matches)
-
-    abv_matches = list(set(abv_matches)) # unique matches
+        line_matches = parse_alcohol_content(line)
+        existing_phrases = [m["phrase"] for m in abv_matches_info]
+        for lm in line_matches:
+            if lm["phrase"] not in existing_phrases:
+                abv_matches_info.append(lm)
 
     # Normalize expected ABV to just numbers for comparison
     expected_abv_nums = re.findall(r'(\d+(?:\.\d+)?)', abv)
@@ -106,15 +132,30 @@ async def analyze_label(
     abv_actual = "None found"
     abv_confidence = 0.0
 
-    if abv_matches:
-        abv_actual = ", ".join(abv_matches)
-        # Check if any extracted number matches any expected number
+    if abv_matches_info:
+        # Collect unique numeric values for comparison and phrases for display
+        abv_values = []
+        abv_phrases = []
+        for m in abv_matches_info:
+            if m["value"] not in abv_values:
+                abv_values.append(m["value"])
+            if m["phrase"] not in abv_phrases:
+                abv_phrases.append(m["phrase"])
+
+        abv_actual = ", ".join(abv_phrases)
+
+        # Check if any extracted number matches any expected number with tolerance
         match_found = False
         for exp in expected_abv_nums:
-            for act in abv_matches:
-                if float(exp) == float(act):
-                    match_found = True
-                    break
+            for act in abv_values:
+                try:
+                    if math.isclose(float(exp), float(act), abs_tol=0.1):
+                        match_found = True
+                        break
+                except (ValueError, TypeError):
+                    continue
+            if match_found:
+                break
 
         if match_found:
             abv_status = "PASS"
