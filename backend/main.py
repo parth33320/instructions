@@ -4,27 +4,13 @@ from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
 import pytesseract
+import numpy as np
 import time
 from PIL import Image
 import io
 import re
 import math
-from fuzzywuzzy import fuzz
-
-# Global constants and pre-compiled regex patterns for performance
-TESSERACT_CONFIG = '--psm 6'
-WHITESPACE_PATTERN = re.compile(r'\s+')
-GW_HEADER_PATTERN = re.compile(r'GOVERNMENT\s+WARNING', re.IGNORECASE)
-GW_STRICT_HEADER_PATTERN = re.compile(r'GOVERNMENT\s+WARNING\s*:')
-ABV_NUM_PATTERN = re.compile(r'(\d+(?:\.\d+)?)')
-
-# Alcohol content regex components
-_ALC_SUFFIX = r'(?:\s*(?:ALC\.?\/VOL\.?\.?|%\s*ALC\.?\/VOL\.?\.?|%\s*BY\s*VOLUME|%\s*BY\s*VOL\.?|%\s*VOLUME|%\s*VOL\.?|BY\s*VOLUME|BY\s*VOL\.?|VOLUME|VOL\.?|PROOF|%))'
-_ALC_PREFIX = r'(?:(?:ALCOHOL|ALC\.?)\s*)'
-ALCOHOL_PATTERN = re.compile(
-    r'(?:' + _ALC_PREFIX + r'(\d+(?:\.\d+)?)(?:' + _ALC_SUFFIX + r')?)|(?:(\d+(?:\.\d+)?)' + _ALC_SUFFIX + r')',
-    re.IGNORECASE
-)
+from fuzzywuzzy import fuzz, process
 
 app = FastAPI(title="TTB Label Verification API")
 
@@ -62,7 +48,7 @@ def verify_government_warning(full_text: str, expected_warning: str):
     3. Adds a manual verification note for font-weight.
     """
     def normalize(t):
-        return WHITESPACE_PATTERN.sub(' ', t).strip().upper()
+        return re.sub(r'\s+', ' ', t).strip().upper()
 
     expected_warning_norm = normalize(expected_warning)
     full_text_norm = normalize(full_text)
@@ -73,11 +59,11 @@ def verify_government_warning(full_text: str, expected_warning: str):
     manual_note = " (Note: Manually verify visual font-weight on physical label)"
 
     # Sequential checks for Jenny Park's compliance rules
-    if not GW_HEADER_PATTERN.search(full_text):
+    if not re.search(r'GOVERNMENT\s+WARNING', full_text, re.IGNORECASE):
         warning_status = "FAIL"
         warning_message = "'GOVERNMENT WARNING:' header not found."
         confidence = 0.0
-    elif not GW_STRICT_HEADER_PATTERN.search(full_text):
+    elif not re.search(r'GOVERNMENT\s+WARNING\s*:', full_text):
         warning_status = "FAIL"
         warning_message = "Missing colon or not in all caps."
         confidence = 0.5
@@ -105,8 +91,17 @@ def parse_alcohol_content(text: str):
     Robustly extract alcohol content values and their surrounding phrases.
     Keywords: alc, alc., alcohol, vol, vol., volume, alc/vol, alc./vol., %, proof
     """
+    # Suffixes: Ordered from longest to shortest to ensure the most descriptive match is captured.
+    suffix = r'(?:\s*(?:ALC\.?\/VOL\.?\.?|%\s*ALC\.?\/VOL\.?\.?|%\s*BY\s*VOLUME|%\s*BY\s*VOL\.?|%\s*VOLUME|%\s*VOL\.?|BY\s*VOLUME|BY\s*VOL\.?|VOLUME|VOL\.?|PROOF|%))'
+    # Prefixes: ALC, ALCOHOL, etc.
+    prefix = r'(?:(?:ALCOHOL|ALC\.?)\s*)'
+
+    # Pattern: (Prefix Number Suffix?) OR (Number Suffix)
+    # Using re.IGNORECASE for keyword matching
+    pattern = r'(?:' + prefix + r'(\d+(?:\.\d+)?)(?:' + suffix + r')?)|(?:(\d+(?:\.\d+)?)' + suffix + r')'
+
     matches = []
-    for match in ALCOHOL_PATTERN.finditer(text):
+    for match in re.finditer(pattern, text, re.IGNORECASE):
         full_phrase = match.group(0).strip()
         # The numeric value could be in group 1 or group 2
         value = match.group(1) if match.group(1) else match.group(2)
@@ -140,7 +135,7 @@ async def analyze_label(
     # Perform OCR
     # pytesseract.image_to_string returns a string
     start_ocr = time.time()
-    full_text = pytesseract.image_to_string(image, config=TESSERACT_CONFIG)
+    full_text = pytesseract.image_to_string(image, config='--psm 6')
     ocr_time = time.time() - start_ocr
     print(f"OCR processing time: {ocr_time:.4f} seconds")
 
@@ -191,7 +186,7 @@ async def analyze_label(
                 abv_matches_info.append(lm)
 
     # Normalize expected ABV to just numbers for comparison
-    expected_abv_nums = ABV_NUM_PATTERN.findall(abv)
+    expected_abv_nums = re.findall(r'(\d+(?:\.\d+)?)', abv)
 
     abv_status = "FAIL"
     abv_actual = "None found"
