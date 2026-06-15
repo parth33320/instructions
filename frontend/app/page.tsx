@@ -43,8 +43,10 @@ export default function Home() {
     formData.append("abv", abv);
     formData.append("government_warning", warning);
 
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
     try {
-      const response = await fetch("http://localhost:8000/analyze", {
+      const response = await fetch(`${apiUrl}/analyze`, {
         method: "POST",
         body: formData,
       });
@@ -65,6 +67,8 @@ export default function Home() {
     setLoading(true);
     const results: AnalysisResponse[] = [];
 
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
     for (let i = 0; i < batchFiles.length; i++) {
       const formData = new FormData();
       formData.append("file", batchFiles[i]);
@@ -73,7 +77,7 @@ export default function Home() {
       formData.append("government_warning", warning);
 
       try {
-        const response = await fetch("http://localhost:8000/analyze", {
+        const response = await fetch(`${apiUrl}/analyze`, {
           method: "POST",
           body: formData,
         });

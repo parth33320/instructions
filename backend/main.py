@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
-import easyocr
+import pytesseract
 import numpy as np
 from PIL import Image
 import io
@@ -11,10 +11,6 @@ import re
 from fuzzywuzzy import fuzz, process
 
 app = FastAPI(title="TTB Label Verification API")
-
-# Initialize EasyOCR Reader
-# Using English, but can be expanded. Download happens on first use.
-reader = easyocr.Reader(['en'])
 
 # Enable CORS for frontend integration
 app.add_middleware(
@@ -51,14 +47,13 @@ async def analyze_label(
 ):
     contents = await file.read()
     image = Image.open(io.BytesIO(contents)).convert('RGB')
-    image_np = np.array(image)
 
     # Perform OCR
-    # results format: [([[x,y],[x,y],[x,y],[x,y]], text, confidence), ...]
-    ocr_results = reader.readtext(image_np)
+    # pytesseract.image_to_string returns a string
+    full_text = pytesseract.image_to_string(image)
 
-    extracted_text_list = [res[1] for res in ocr_results]
-    full_text = " ".join(extracted_text_list)
+    # Split into lines for the brand name check logic that follows
+    extracted_text_list = [line.strip() for line in full_text.split('\n') if line.strip()]
 
     results = []
 
