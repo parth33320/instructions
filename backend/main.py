@@ -39,6 +39,52 @@ class AnalysisResponse(BaseModel):
 async def root():
     return {"message": "TTB Label Verification API is running"}
 
+def verify_government_warning(full_text: str, expected_warning: str):
+    """
+    Verifies the Government Warning section based on strict TTB rules.
+    1. Header must be "GOVERNMENT WARNING:" (all caps, trailing colon).
+    2. Body wording is checked via fuzzy matching.
+    3. Adds a manual verification note for font-weight.
+    """
+    def normalize(t):
+        return re.sub(r'\s+', ' ', t).strip().upper()
+
+    expected_warning_norm = normalize(expected_warning)
+    full_text_norm = normalize(full_text)
+
+    warning_status = "FAIL"
+    warning_message = ""
+    confidence = 0.5
+    manual_note = " (Note: Manually verify visual font-weight on physical label)"
+
+    # Sequential checks for Jenny Park's compliance rules
+    if not re.search(r'GOVERNMENT\s+WARNING', full_text, re.IGNORECASE):
+        warning_status = "FAIL"
+        warning_message = "'GOVERNMENT WARNING:' header not found."
+        confidence = 0.0
+    elif not re.search(r'GOVERNMENT\s+WARNING\s*:', full_text):
+        warning_status = "FAIL"
+        warning_message = "Missing colon or not in all caps."
+        confidence = 0.5
+    else:
+        # Strict header check passed, now check body wording
+        warning_score = fuzz.token_set_ratio(expected_warning_norm, full_text_norm)
+
+        if warning_score >= 95:
+            warning_status = "PASS"
+            warning_message = "Found with high accuracy." + manual_note
+            confidence = 1.0
+        elif warning_score >= 85:
+            warning_status = "WARNING"
+            warning_message = "Wording might have minor discrepancies." + manual_note
+            confidence = 0.8
+        else:
+            warning_status = "FAIL"
+            warning_message = f"Wording mismatch. Match score: {warning_score}%"
+            confidence = 0.5
+
+    return warning_status, warning_message, confidence
+
 def parse_alcohol_content(text: str):
     """
     Robustly extract alcohol content values and their surrounding phrases.
@@ -174,47 +220,14 @@ async def analyze_label(
     ))
 
     # 3. Government Warning Verification (Exact with normalization)
-    # The requirement is very strict about "GOVERNMENT WARNING:" in caps and bold.
-    # Since OCR might not give us bold info easily, we focus on exact wording and caps.
-
-    # Normalize whitespace and case for the core text check, but check "GOVERNMENT WARNING:" separately
-    def normalize(t):
-        return re.sub(r'\s+', ' ', t).strip().upper()
-
-    expected_warning_norm = normalize(government_warning)
-    full_text_norm = normalize(full_text)
-
-    warning_status = "FAIL"
-    warning_message = ""
-
-    if "GOVERNMENT WARNING:" in full_text:
-        # Check for exact wording
-        # We use fuzzy matching but with a very high threshold for the "exact" requirement
-        warning_score = fuzz.token_set_ratio(expected_warning_norm, full_text_norm)
-
-        if warning_score >= 95:
-            warning_status = "PASS"
-            warning_message = "Found with high accuracy."
-        elif warning_score >= 85:
-            warning_status = "WARNING"
-            warning_message = "Wording might have minor discrepancies."
-        else:
-            warning_status = "FAIL"
-            warning_message = f"Wording mismatch. Match score: {warning_score}%"
-    else:
-        if "GOVERNMENT WARNING" in full_text.upper():
-            warning_status = "FAIL"
-            warning_message = "Missing colon after 'GOVERNMENT WARNING' or not in all caps."
-        else:
-            warning_status = "FAIL"
-            warning_message = "'GOVERNMENT WARNING:' header not found."
+    warning_status, warning_message, confidence = verify_government_warning(full_text, government_warning)
 
     results.append(VerificationResult(
         field="Government Warning",
         expected=government_warning[:50] + "...",
         actual="Extracted text contains warning" if warning_status != "FAIL" else "Not found/Incorrect",
         status=warning_status,
-        confidence=1.0 if warning_status == "PASS" else 0.5,
+        confidence=confidence,
         message=warning_message
     ))
 

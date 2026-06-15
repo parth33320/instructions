@@ -1,7 +1,57 @@
 import requests
 import json
 import os
-from main import parse_alcohol_content
+from main import parse_alcohol_content, verify_government_warning
+
+def test_government_warning_verification():
+    """
+    Unit test for the Government Warning verification logic.
+    Ensures strict header rules and fuzzy body matching.
+    """
+    expected = "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects."
+
+    test_cases = [
+        # (input_text, expected_status, expected_message_part)
+        (
+            "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects.",
+            "PASS", "Found with high accuracy."
+        ),
+        (
+            "Government Warning: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects.",
+            "FAIL", "Missing colon or not in all caps."
+        ),
+        (
+            "GOVERNMENT WARNING (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects.",
+            "FAIL", "Missing colon or not in all caps."
+        ),
+        (
+            "THE SURGEON GENERAL SAYS DRINKING IS BAD.",
+            "FAIL", "'GOVERNMENT WARNING:' header not found."
+        ),
+        (
+            "GOVERNMENT WARNING: (1) Some other text that is not the warning.",
+            "FAIL", "Wording mismatch."
+        ),
+        (
+            "GOVERNMENT WARNING: (1) Accoding to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects.",
+            "PASS", "Found with high accuracy." # Minor typo (Accoding) should still PASS or WARNING
+        )
+    ]
+
+    print("\nRunning Government Warning Verification Unit Tests...")
+    all_passed = True
+    for text, exp_status, exp_msg_part in test_cases:
+        status, message, confidence = verify_government_warning(text, expected)
+
+        passed = (status == exp_status and exp_msg_part in message)
+
+        if passed:
+            print(f"✅ PASS: '{text[:30]}...' -> {status} ('{message[:30]}...')")
+        else:
+            print(f"❌ FAIL: '{text[:30]}...' -> Expected {exp_status} ({exp_msg_part}), but got {status} ('{message}')")
+            all_passed = False
+
+    return all_passed
 
 def test_abv_parsing():
     """
@@ -72,9 +122,14 @@ def test_analyze_endpoint():
 if __name__ == "__main__":
     # Run unit tests first
     abv_passed = test_abv_parsing()
+    warning_passed = test_government_warning_verification()
 
-    if abv_passed:
-        print("\nAll ABV parsing unit tests passed! Proceeding to endpoint test...")
+    if abv_passed and warning_passed:
+        print("\nAll unit tests passed! Proceeding to endpoint test...")
         test_analyze_endpoint()
     else:
-        print("\nABV parsing unit tests failed. Skipping endpoint test.")
+        if not abv_passed:
+            print("\nABV parsing unit tests failed.")
+        if not warning_passed:
+            print("\nGovernment Warning verification unit tests failed.")
+        print("Skipping endpoint test.")
